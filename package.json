@@ -1,0 +1,8 @@
+{
+  "name": "prox-challenge",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}
