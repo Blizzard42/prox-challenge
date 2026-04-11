@@ -41,15 +41,14 @@ class ChatRequest(BaseModel):
 async def chat_endpoint(request: ChatRequest):
     async def generate_sse():
         try:
-            async with client.messages.stream(
+            stream = await client.messages.create(
                 max_tokens=2048,
                 messages=request.messages,
-                model="claude-sonnet-4-6", 
-            ) as stream:
-                async for text in stream.text_stream:
-                    # Stream structured JSON payloads back to the client
-                    payload = json.dumps({"text": text})
-                    yield f"data: {payload}\n\n"
+                model="claude-sonnet-4-6",
+                stream=True,
+            )
+            async for event in stream:
+                yield f"data: {event.model_dump_json()}\n\n"
         except APIError as e:
             error_payload = json.dumps({"error": str(e)})
             yield f"data: {error_payload}\n\n"
