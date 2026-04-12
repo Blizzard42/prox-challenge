@@ -10,11 +10,25 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from anthropic import AsyncAnthropic, APIError
 
+import chromadb
+from chromadb.utils import embedding_functions
+
 # Load environment variables from the root .env file
 dotenv_path = Path(__file__).parent.parent.parent / ".env"
 load_dotenv(dotenv_path=dotenv_path)
 
 app = FastAPI(title="Claude Prox Challenge Backend")
+
+chroma_client = None
+collection = None
+
+@app.on_event("startup")
+def startup_event():
+    global chroma_client, collection
+    chroma_data_dir = Path(__file__).parent / "chroma_data"
+    chroma_client = chromadb.PersistentClient(path=str(chroma_data_dir))
+    emb_fn = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+    collection = chroma_client.get_or_create_collection(name="vulcan_manual", embedding_function=emb_fn)
 
 # Setup CORS using an explicit array of standard local ports
 app.add_middleware(
@@ -39,12 +53,39 @@ class ChatRequest(BaseModel):
 
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
+    # Extract query
+    latest_message = request.messages[-1]
+    query_text = latest_message.get("content", "")
+    if isinstance(query_text, list):
+        query_texts = [block["text"] for block in query_text if block.get("type") == "text"]
+        query_text = " ".join(query_texts)
+
+    # Query Chroma
+    results = collection.query(
+        query_texts=[query_text],
+        n_results=4
+    )
+    
+    context_chunks = []
+    if results and results.get("documents") and results["documents"][0]:
+        for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
+            source = meta.get("source", "Unknown")
+            page = meta.get("page", "Unknown")
+            context_chunks.append(f"[Source: {source}, Page: {page}]\n{doc}")
+            
+    context_str = "\n\n".join(context_chunks)
+    print("----- CONTEXT -----")
+    print(context_str)
+    print("-------------------")
+    system_prompt = f"You are the Prox Vulcan OmniPro 220 Support Agent. Answer the user's questions based ONLY on the following context. If you don't know the answer based on the context, say so.\n<context>\n{context_str}\n</context>\nCite the page number and document name when providing your answer."
+
     async def generate_sse():
         try:
             stream = await client.messages.create(
                 max_tokens=2048,
                 messages=request.messages,
                 model="claude-sonnet-4-6",
+                system=system_prompt,
                 stream=True,
             )
             async for event in stream:
