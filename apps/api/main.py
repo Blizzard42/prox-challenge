@@ -14,27 +14,18 @@ from anthropic import AsyncAnthropic, APIError
 import chromadb
 from chromadb.utils import embedding_functions
 
+# Global cache for specs data to avoid disk I/O on every tool call
+SPECS_DATA = {}
+
 def get_duty_cycle(process: str, voltage: str) -> str:
-    data_dir = Path(__file__).parent / "data"
-    input_path = data_dir / "machine_specs.json"
-    if not input_path.exists():
-        return "Specification not found in manual"
-    with open(input_path, "r", encoding="utf-8") as f:
-        specs = json.load(f)
     try:
-        return specs["duty_cycle"][process][voltage]
+        return SPECS_DATA.get("duty_cycle", {})[process][voltage]
     except KeyError:
         return "Specification not found in manual"
 
 def get_polarity_setup(process: str) -> str:
-    data_dir = Path(__file__).parent / "data"
-    input_path = data_dir / "machine_specs.json"
-    if not input_path.exists():
-        return "Specification not found in manual"
-    with open(input_path, "r", encoding="utf-8") as f:
-        specs = json.load(f)
     try:
-        return specs["polarity"][process]
+        return SPECS_DATA.get("polarity", {})[process]
     except KeyError:
         return "Specification not found in manual"
 
@@ -86,13 +77,28 @@ collection = None
 
 @app.on_event("startup")
 def startup_event():
-    global chroma_client, collection
+    global chroma_client, collection, SPECS_DATA
+    
+    print("\n🚀 Starting Backend Server...")
+    
+    # Load JSON specs into memory
+    specs_path = Path(__file__).parent / "data" / "machine_specs.json"
+    if specs_path.exists():
+        with open(specs_path, "r", encoding="utf-8") as f:
+            SPECS_DATA = json.load(f)
+        print("✅ Structured specs loaded into memory.")
+    else:
+        print("⚠️ Warning: machine_specs.json not found in data directory.")
+
+    # Initialize ChromaDB
     chroma_data_dir = Path(__file__).parent / "chroma_data"
     chroma_client = chromadb.PersistentClient(path=str(chroma_data_dir))
     emb_fn = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
     collection = chroma_client.get_or_create_collection(name="vulcan_manual", embedding_function=emb_fn)
+    print("✅ ChromaDB initialized and connected.")
+    print("--------------------------------------\n")
 
-# Setup CORS using an explicit array of standard local ports
+# Setup CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -105,12 +111,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize Anthropic client
-# We expect ANTHROPIC_API_KEY to be loaded in the environment
 client = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 class ChatRequest(BaseModel):
-    # Using generalized List[Dict[str, Any]] to easily accept text and multimodal image blocks
     messages: List[Dict[str, Any]]
 
 @app.post("/chat")
@@ -122,10 +125,13 @@ async def chat_endpoint(request: ChatRequest):
         query_texts = [block["text"] for block in query_text if block.get("type") == "text"]
         query_text = " ".join(query_texts)
 
+    print(f"\n[USER] 💬 {query_text}")
+
     # Query Chroma
+    print(f"[RAG]  🔍 Searching ChromaDB...")
     results = collection.query(
         query_texts=[query_text],
-        n_results=4
+        n_results=2 
     )
     
     context_chunks = []
@@ -136,9 +142,7 @@ async def chat_endpoint(request: ChatRequest):
             context_chunks.append(f"[Source: {source}, Page: {page}]\n{doc}")
             
     context_str = "\n\n".join(context_chunks)
-    print("----- CONTEXT -----")
-    print(context_str)
-    print("-------------------")
+    print(f"[RAG]  📄 Retrieved {len(context_chunks)} chunks.")
     
     clarification_rule = """GUARDRAIL: If the user asks for wire feed speed, voltage, or machine setup parameters, you MUST verify you know ALL of the following before answering:
     1. The welding process (MIG, Flux-Cored, TIG, or Stick).
@@ -212,6 +216,7 @@ NOTE: If your context indicates there is a visual diagram or chart on a page, yo
                 for tc in tool_calls:
                     try:
                         input_data = json.loads(tc["input_json"])
+                        print(f"\n[TOOL] 🛠️  Executing '{tc['name']}' with args: {input_data}")
                         
                         # Handle Vision retrieval manually
                         if tc["name"] == "view_manual_page":
@@ -234,12 +239,14 @@ NOTE: If your context indicates there is a visual diagram or chart on a page, yo
                                         }
                                     ]
                                 })
+                                print(f"[TOOL] ✅  Success: Attached image data for page {page_number}")
                             else:
                                 user_message["content"].append({
                                     "type": "tool_result",
                                     "tool_use_id": tc["id"],
                                     "content": f"Error: Page {page_number} image not found locally."
                                 })
+                                print(f"[TOOL] ❌  Error: Page {page_number} not found.")
                             continue
                             
                         # Handle text specs
@@ -254,20 +261,38 @@ NOTE: If your context indicates there is a visual diagram or chart on a page, yo
                             "tool_use_id": tc["id"],
                             "content": str(result_text)
                         })
+                        print(f"[TOOL] ✅  Success: {str(result_text)[:100]}...")
+                        
                     except Exception as e:
                         user_message["content"].append({
                             "type": "tool_result",
                             "tool_use_id": tc["id"],
                             "content": f"Tool execution failed: {e}"
                         })
+                        print(f"[TOOL] ❌  Exception occurred: {e}")
                         
                 current_messages.append(user_message)
+                print(f"[AGENT] 🔄 Sending tool results back to Claude for final synthesis...\n")
+                
+                # INJECT SYNTHETIC SPACING EVENT HERE
+                # This guarantees a double newline in the frontend UI between pre-tool text and post-tool text
+                synthetic_space_event = {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {
+                        "type": "text_delta",
+                        "text": "\n\n"
+                    }
+                }
+                yield f"data: {json.dumps(synthetic_space_event)}\n\n"
                 
             except APIError as e:
+                print(f"\n[ERROR] 🛑 Anthropic API Error: {str(e)}")
                 error_payload = json.dumps({"error": str(e)})
                 yield f"data: {error_payload}\n\n"
                 break
             except Exception as e:
+                print(f"\n[ERROR] 🛑 Internal Server Error: {str(e)}")
                 error_payload = json.dumps({"error": "Internal Server Error"})
                 yield f"data: {error_payload}\n\n"
                 break
