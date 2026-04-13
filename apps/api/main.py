@@ -17,40 +17,57 @@ from chromadb.utils import embedding_functions
 # Global cache for specs data to avoid disk I/O on every tool call
 SPECS_DATA = {}
 
-def get_duty_cycle(process: str, voltage: str) -> str:
+def get_cable_configuration(process: str) -> str:
     try:
-        return SPECS_DATA.get("duty_cycle", {})[process][voltage]
+        process_data = SPECS_DATA.get("processes", {}).get(process)
+        if not process_data:
+            raise KeyError
+        return json.dumps(process_data)
     except KeyError:
-        return "Specification not found in manual"
+        return "DATA_NOT_IN_STATIC_CACHE. INSTRUCTION: You must now use the `view_manual_page` tool to inspect the Quick Start Guide visually, or rely on your standard RAG context."
 
-def get_polarity_setup(process: str) -> str:
+def get_process_recommendation(material: str, thickness: str, environment: str) -> str:
     try:
-        return SPECS_DATA.get("polarity", {})[process]
+        matrix = SPECS_DATA.get("selection_matrix", [])
+        if not matrix:
+            raise KeyError
+        
+        results = []
+        for row in matrix:
+            row_material = row.get("material", "").lower()
+            if material.lower() in row_material or not material:
+                results.append(row)
+        
+        if not results:
+            raise KeyError
+            
+        return json.dumps(results)
     except KeyError:
-        return "Specification not found in manual"
+        return "DATA_NOT_IN_STATIC_CACHE. INSTRUCTION: You must now use the `view_manual_page` tool to inspect the Quick Start Guide visually, or rely on your standard RAG context."
 
 TOOLS_SCHEMA = [
     {
-        "name": "get_duty_cycle",
-        "description": "Retrieves the explicit duty cycle limits for a specific welding process and input voltage.",
+        "name": "get_cable_configuration",
+        "description": "Retrieves the synergic machine cable configuration (polarity, gas, drive rolls) for a specific welding process. Use this tool whenever a user asks about how to set up the machine.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "process": {"type": "string", "enum": ["MIG", "TIG", "Stick"], "description": "The welding process."},
-                "voltage": {"type": "string", "enum": ["120V", "240V"], "description": "The input voltage."}
+                "process": {"type": "string", "enum": ["MIG", "Flux_Cored", "TIG", "Stick"], "description": "The specific welding process."}
             },
-            "required": ["process", "voltage"]
+            "required": ["process"]
         }
     },
     {
-        "name": "get_polarity_setup",
-        "description": "Retrieves the polarity setup configuration for a specific welding process.",
+        "name": "get_process_recommendation",
+        "description": "Retrieves a recommended welding process based on material, thickness, and environment. Use this tool whenever a user asks what process they should use for their project.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "process": {"type": "string", "enum": ["MIG_Solid_Wire", "Flux_Cored", "TIG", "Stick"], "description": "The specific process or wire type."}
+                "material": {"type": "string", "description": "The material being welded (e.g., Steel, Aluminum)."},
+                "thickness": {"type": "string", "description": "The material's thickness."},
+                "environment": {"type": "string", "description": "The environment (e.g., indoor, outdoor, windy)."}
             },
-            "required": ["process"]
+            "required": ["material", "thickness", "environment"]
         }
     },
     {
@@ -150,8 +167,27 @@ async def chat_endpoint(request: ChatRequest):
     3. The material thickness.
     4. The wire/electrode diameter.
 If ANY of these four variables are missing, do not call a tool and do not guess. Politely ask the user to provide the missing specific details.
-NOTE: If your context indicates there is a visual diagram or chart on a page, you optionally have the ability to retrieve and 'look' at that visual page by calling the view_manual_page tool!"""
-    system_prompt = f"You are the Prox Vulcan OmniPro 220 Support Agent. Answer the user's questions based ONLY on the following context. If you don't know the answer based on the context, say so.\n{clarification_rule}\n<context>\n{context_str}\n</context>\nCite the page number and document name when providing your answer."
+"""
+
+    tool_rules = """
+CRITICAL TOOL USE RULES (FAILURE TO FOLLOW THESE WILL BREAK THE SYSTEM):
+1. SILENT EXECUTION: Do NOT narrate your tool usage. Never say "Let me check...", "I'm looking at...", or "I found...". Output the tool call immediately. Only speak to the user ONCE you have the final answer.
+2. NO BLIND SEARCHING: Do NOT guess page numbers. ONLY use `view_manual_page` if your text context EXPLICITLY mentions a specific page number containing a visual chart or diagram to save on api cost.
+"""
+    interactive_ui_protocol = """INTERACTIVE UI RENDERING PROTOCOL
+If you are recommending a welding process OR explaining a physical cable setup OR troubleshooting mechanical issues, you MUST append a strict JSON block at the very end of your response, wrapped in ```json ... ``` tags. 
+For Process Recommendations, use this schema:
+```json
+{ "artifact_type": "process_selector", "inputs": {"material": "...", "thickness": "...", "environment": "..."} }```
+For Cable Setup, use this schema:
+```json
+{ "artifact_type": "physical_setup", "process": "...", "ground_polarity": "...", "torch_polarity": "..." }```
+For Troubleshooting Mechanical Issues (e.g., porosity, wire feeding problems), use this schema:
+```json
+{ "artifact_type": "troubleshooting", "issue": "...", "steps": ["Check X", "Adjust Y", "Verify Z"] }```
+Do not include any text after the JSON block."""
+
+    system_prompt = f"You are the Prox Vulcan OmniPro 220 Support Agent. Answer the user's questions based ONLY on the following context. If you don't know the answer based on the context, say so.\n{clarification_rule}\n\n{tool_rules}\n\n{interactive_ui_protocol}\n\n<context>\n{context_str}\n</context>\nCite the page number and document name when providing your answer."
 
     async def generate_sse():
         current_messages = list(request.messages)
@@ -251,10 +287,14 @@ NOTE: If your context indicates there is a visual diagram or chart on a page, yo
                             
                         # Handle text specs
                         result_text = "Specification not found in manual"
-                        if tc["name"] == "get_duty_cycle":
-                            result_text = get_duty_cycle(input_data.get("process"), input_data.get("voltage"))
-                        elif tc["name"] == "get_polarity_setup":
-                            result_text = get_polarity_setup(input_data.get("process"))
+                        if tc["name"] == "get_cable_configuration":
+                            result_text = get_cable_configuration(input_data.get("process"))
+                        elif tc["name"] == "get_process_recommendation":
+                            result_text = get_process_recommendation(
+                                input_data.get("material", ""),
+                                input_data.get("thickness", ""),
+                                input_data.get("environment", "")
+                            )
                             
                         user_message["content"].append({
                             "type": "tool_result",
@@ -276,15 +316,16 @@ NOTE: If your context indicates there is a visual diagram or chart on a page, yo
                 
                 # INJECT SYNTHETIC SPACING EVENT HERE
                 # This guarantees a double newline in the frontend UI between pre-tool text and post-tool text
-                synthetic_space_event = {
-                    "type": "content_block_delta",
-                    "index": 0,
-                    "delta": {
-                        "type": "text_delta",
-                        "text": "\n\n"
+                if current_text.strip():
+                    synthetic_space_event = {
+                        "type": "content_block_delta",
+                        "index": 0,
+                        "delta": {
+                            "type": "text_delta",
+                            "text": "\n\n"
+                        }
                     }
-                }
-                yield f"data: {json.dumps(synthetic_space_event)}\n\n"
+                    yield f"data: {json.dumps(synthetic_space_event)}\n\n"
                 
             except APIError as e:
                 print(f"\n[ERROR] 🛑 Anthropic API Error: {str(e)}")

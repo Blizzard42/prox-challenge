@@ -2,11 +2,108 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Menu, ShieldAlert, Cpu } from 'lucide-react';
+import ProcessSelector from './artifacts/ProcessSelector';
+import PhysicalSetup from './artifacts/PhysicalSetup';
+import TroubleshootingTree from './artifacts/TroubleshootingTree';
 
 interface Message {
   role: 'user' | 'assistant';
   content: string;
 }
+
+const parseArtifacts = (content: string): { text: string; artifacts: any[] } => {
+  if (!content) return { text: "", artifacts: [] };
+
+  const artifacts: any[] = [];
+  let text = content;
+
+  try {
+    const regex = /```json\s+([\s\S]*?)\s+```/g;
+    let match;
+
+    while ((match = regex.exec(content)) !== null) {
+      if (match[1]) {
+        try {
+          const parsed = JSON.parse(match[1]);
+          if (parsed && typeof parsed === 'object') {
+            artifacts.push(parsed);
+            text = text.replace(match[0], "");
+          }
+        } catch (e) {
+          console.warn("Failed to parse a JSON block", e);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("Failed artifact parsing entirely:", e);
+  }
+
+  return { text: text.trim(), artifacts };
+};
+
+const parseInlineStyles = (text: string) => {
+  const parts = text.split(/(\*\*.*?\*\*|\*.*?\*|`.*?`)/g);
+  return parts.map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={index} className="font-semibold text-yellow-500/90">{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith('*') && part.endsWith('*')) {
+      return <em key={index} className="italic text-zinc-300">{part.slice(1, -1)}</em>;
+    }
+    if (part.startsWith('`') && part.endsWith('`')) {
+      return <code key={index} className="bg-zinc-800 text-zinc-300 px-1 py-0.5 rounded text-xs font-mono">{part.slice(1, -1)}</code>;
+    }
+    return part;
+  });
+};
+
+const MarkdownRenderer = ({ content }: { content: string }) => {
+  if (!content) return null;
+
+  const lines = content.split('\n');
+
+  return (
+    <div className="flex flex-col gap-1.5 break-words">
+      {lines.map((line, i) => {
+        if (!line.trim()) return <div key={i} className="h-1.5" />;
+
+        const headingMatch = line.match(/^(#{1,6})\s+(.*)$/);
+        if (headingMatch) {
+          const level = headingMatch[1].length;
+          const text = headingMatch[2];
+          const sizes = ['text-xl', 'text-lg', 'text-base', 'text-sm', 'text-sm', 'text-sm'];
+          const margin = i === 0 ? 'mb-1' : 'mt-3 mb-1';
+          return (
+            <div key={i} className={`font-semibold text-zinc-100 ${sizes[level - 1]} ${margin}`}>
+              {parseInlineStyles(text)}
+            </div>
+          );
+        }
+
+        if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
+          return (
+            <div key={i} className="flex gap-2 ml-1">
+              <span className="text-zinc-500 select-none">•</span>
+              <span className="flex-1">{parseInlineStyles(line.replace(/^[-*]\s+/, ''))}</span>
+            </div>
+          );
+        }
+
+        if (/^\d+\.\s/.test(line.trim())) {
+          const match = line.trim().match(/^(\d+\.)\s+(.*)/);
+          return (
+            <div key={i} className="flex gap-2 ml-1">
+              <span className="text-zinc-500 tabular-nums select-none">{match?.[1]}</span>
+              <span className="flex-1">{parseInlineStyles(match?.[2] || '')}</span>
+            </div>
+          );
+        }
+
+        return <p key={i} className="leading-relaxed">{parseInlineStyles(line)}</p>;
+      })}
+    </div>
+  );
+};
 
 export default function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -113,43 +210,63 @@ export default function ChatInterface() {
       </header>
 
       {/* Messages Area */}
-      <main className="flex-1 overflow-y-auto p-4 space-y-6">
+      <main className="flex-1 overflow-y-auto p-4">
+        <div className="max-w-3xl mx-auto space-y-6 w-full">
 
-        {/* Intro Message */}
-        <div className="flex justify-center">
-          <span className="text-xs font-medium text-zinc-600 bg-zinc-900/50 px-3 py-1 rounded-full border border-zinc-800">
-            System Initialized
-          </span>
-        </div>
+          {/* Intro Message */}
+          <div className="flex justify-center">
+            <span className="text-xs font-medium text-zinc-600 bg-zinc-900/50 px-3 py-1 rounded-full border border-zinc-800">
+              System Initialized
+            </span>
+          </div>
 
-        {messages.map((msg, index) => {
-          if (msg.role === 'user') {
+          {messages.map((msg, index) => {
+            if (msg.role === 'user') {
+              return (
+                <div key={index} className="flex justify-end animate-in fade-in slide-in-from-bottom-2 duration-300">
+                  <div className="max-w-[85%] rounded-2xl rounded-tr-sm bg-zinc-800 px-4 py-3 text-sm text-zinc-100 shadow-sm border border-zinc-700/50 whitespace-pre-wrap">
+                    {msg.content}
+                  </div>
+                </div>
+              );
+            }
+
+            const isLastAgentMessage = index === messages.length - 1 && isLoading;
+            const { text, artifacts } = parseArtifacts(msg.content);
+
             return (
-              <div key={index} className="flex justify-end animate-in fade-in slide-in-from-bottom-2 duration-300">
-                <div className="max-w-[85%] rounded-2xl rounded-tr-sm bg-zinc-800 px-4 py-3 text-sm text-zinc-100 shadow-sm border border-zinc-700/50">
-                  {msg.content}
+              <div key={index} className="flex justify-start gap-3 animate-in fade-in slide-in-from-bottom-2 duration-500 fill-mode-both">
+                <div className="flex-shrink-0 mt-1">
+                  <div className={`w-7 h-7 rounded-full bg-zinc-900 border border-yellow-500/50 flex items-center justify-center ${isLastAgentMessage ? 'animate-pulse' : ''}`}>
+                    <Cpu size={14} className={`text-yellow-500 ${isLastAgentMessage ? 'animate-[spin_2.5s_linear_infinite]' : ''}`} />
+                  </div>
+                </div>
+                <div className="max-w-[85%] space-y-3 w-full">
+                  {(text || isLastAgentMessage || artifacts.length === 0) && (
+                    <div className="rounded-2xl rounded-tl-sm bg-zinc-900 px-4 py-3 text-sm text-zinc-200 border border-zinc-800/80 shadow-md">
+                      {text ? <MarkdownRenderer content={text} /> : <p className="leading-relaxed text-zinc-500 animate-pulse">Thinking...</p>}
+                    </div>
+                  )}
+
+                  {artifacts.map((artifact, i) => (
+                    <React.Fragment key={i}>
+                      {artifact.artifact_type === 'process_selector' && (
+                        <ProcessSelector payload={artifact} llmText={text} />
+                      )}
+                      {artifact.artifact_type === 'physical_setup' && (
+                        <PhysicalSetup payload={artifact} />
+                      )}
+                      {artifact.artifact_type === 'troubleshooting' && (
+                        <TroubleshootingTree payload={artifact} />
+                      )}
+                    </React.Fragment>
+                  ))}
                 </div>
               </div>
             );
-          }
-
-          const isLastAgentMessage = index === messages.length - 1 && isLoading;
-          return (
-            <div key={index} className="flex justify-start gap-3 animate-in fade-in slide-in-from-bottom-2 duration-500 fill-mode-both">
-              <div className="flex-shrink-0 mt-1">
-                <div className={`w-7 h-7 rounded-full bg-zinc-900 border border-yellow-500/50 flex items-center justify-center ${isLastAgentMessage ? 'animate-pulse' : ''}`}>
-                  <Cpu size={14} className={`text-yellow-500 ${isLastAgentMessage ? 'animate-[spin_2.5s_linear_infinite]' : ''}`} />
-                </div>
-              </div>
-              <div className="max-w-[85%] space-y-3">
-                <div className="rounded-2xl rounded-tl-sm bg-zinc-900 px-4 py-3 text-sm text-zinc-200 border border-zinc-800/80 shadow-md">
-                  <p className="whitespace-pre-wrap leading-relaxed">{msg.content || (isLastAgentMessage ? "Thinking..." : "")}</p>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-        <div ref={messagesEndRef} />
+          })}
+          <div ref={messagesEndRef} />
+        </div>
       </main>
 
       {/* Input Area */}
