@@ -135,7 +135,7 @@ def startup_event():
     print("--------------------------------------\n")
 
 # Setup CORS
-FRONTEND_URLS = os.getenv("FRONTEND_URLS", "http://localhost:3000,http://localhost:3001,http://localhost:3002").split(",")
+FRONTEND_URLS = os.getenv("FRONTEND_URLS", "http://localhost:3000,http://localhost:3001,http://localhost:3002,https://prox-challenge-web.vercel.app").split(",")
 
 app.add_middleware(
     CORSMiddleware,
