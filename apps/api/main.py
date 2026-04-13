@@ -7,6 +7,7 @@ from typing import List, Dict, Any
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from anthropic import AsyncAnthropic, APIError
@@ -80,6 +81,17 @@ TOOLS_SCHEMA = [
             },
             "required": ["page_number"]
         }
+    },
+    {
+        "name": "request_diagrams",
+        "description": "Retrieves internal image URLs and descriptions of extracted diagrams available on a specific manual page. Once you get these URLs, you can render them to the user using the DiagramViewer component block.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "page_number": {"type": "integer", "description": "The page number to search for diagrams."}
+            },
+            "required": ["page_number"]
+        }
     }
 ]
 
@@ -88,6 +100,9 @@ dotenv_path = Path(__file__).parent.parent.parent / ".env"
 load_dotenv(dotenv_path=dotenv_path)
 
 app = FastAPI(title="Claude Prox Challenge Backend")
+
+# Mount the static directory
+app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 chroma_client = None
 collection = None
@@ -116,13 +131,11 @@ def startup_event():
     print("--------------------------------------\n")
 
 # Setup CORS
+FRONTEND_URLS = os.getenv("FRONTEND_URLS", "http://localhost:3000,http://localhost:3001,http://localhost:3002").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://localhost:3002"
-    ],
+    allow_origins=FRONTEND_URLS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -175,7 +188,7 @@ CRITICAL TOOL USE RULES (FAILURE TO FOLLOW THESE WILL BREAK THE SYSTEM):
 2. NO BLIND SEARCHING: Do NOT guess page numbers. ONLY use `view_manual_page` if your text context EXPLICITLY mentions a specific page number containing a visual chart or diagram to save on api cost.
 """
     interactive_ui_protocol = """INTERACTIVE UI RENDERING PROTOCOL
-If you are recommending a welding process OR explaining a physical cable setup OR troubleshooting mechanical issues, you MUST append a strict JSON block at the very end of your response, wrapped in ```json ... ``` tags. 
+If you are recommending a welding process OR explaining a physical cable setup OR troubleshooting mechanical issues, you MUST output a strict JSON block inline, immediately following the sentence where you introduce it, wrapped in ```json ... ``` tags. 
 For Process Recommendations, use this schema:
 ```json
 { "artifact_type": "process_selector", "inputs": {"material": "...", "thickness": "...", "environment": "..."} }```
@@ -185,9 +198,12 @@ For Cable Setup, use this schema:
 For Troubleshooting Mechanical Issues (e.g., porosity, wire feeding problems), use this schema:
 ```json
 { "artifact_type": "troubleshooting", "issue": "...", "steps": ["Check X", "Adjust Y", "Verify Z"] }```
+For Displaying specific relevant diagrams to the user, output this schema at the end of the message:
+```json
+{"component": "DiagramViewer", "props": {"imageUrl": "...", "caption": "..."}}```
 Do not include any text after the JSON block."""
 
-    system_prompt = f"You are the Prox Vulcan OmniPro 220 Support Agent. Answer the user's questions based ONLY on the following context. If you don't know the answer based on the context, say so.\n{clarification_rule}\n\n{tool_rules}\n\n{interactive_ui_protocol}\n\n<context>\n{context_str}\n</context>\nCite the page number and document name when providing your answer."
+    system_prompt = f"You are the Prox Vulcan OmniPro 220 Support Agent. Answer the user's questions based ONLY on the following context. If you don't know the answer based on the context, say so.\n{clarification_rule}\n\n{tool_rules}\n\n{interactive_ui_protocol}\n\n<context>\n{context_str}\n</context>\nCite the page number and document name when providing your answer. When citing a page number, you MUST format it exactly like this: [Page X] (where X is the number). Do not wrap the citation in asterisks, parentheses, or italics."
 
     async def generate_sse():
         current_messages = list(request.messages)
@@ -257,7 +273,7 @@ Do not include any text after the JSON block."""
                         # Handle Vision retrieval manually
                         if tc["name"] == "view_manual_page":
                             page_number = input_data.get("page_number")
-                            page_path = Path(__file__).parent / "data" / "pages" / f"page_{page_number}.jpg"
+                            page_path = Path(__file__).parent / "static" / "pages" / f"page_{page_number}.jpg"
                             if page_path.exists():
                                 with open(page_path, "rb") as img_file:
                                     b64_data = base64.b64encode(img_file.read()).decode("utf-8")
@@ -295,6 +311,22 @@ Do not include any text after the JSON block."""
                                 input_data.get("thickness", ""),
                                 input_data.get("environment", "")
                             )
+                        elif tc["name"] == "request_diagrams":
+                            page_number = input_data.get("page_number")
+                            meta_path = Path(__file__).parent / "static" / "diagrams" / "diagram_metadata.json"
+                            if meta_path.exists():
+                                with open(meta_path, "r", encoding="utf-8") as f:
+                                    meta = json.load(f)
+                                matching = {
+                                    k: {"imageUrl": f"/static/diagrams/{k}", "description": v["description"]}
+                                    for k, v in meta.items() if v["page"] == page_number
+                                }
+                                if matching:
+                                    result_text = json.dumps(matching)
+                                else:
+                                    result_text = "No extracted diagrams found on this page."
+                            else:
+                                result_text = "Metadata missing. Extraction step incomplete."
                             
                         user_message["content"].append({
                             "type": "tool_result",

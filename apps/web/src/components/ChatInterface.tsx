@@ -1,106 +1,140 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Menu, ShieldAlert, Cpu } from 'lucide-react';
+import { Send, Menu, ShieldAlert, Cpu, Mic, MicOff, X } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import ProcessSelector from './artifacts/ProcessSelector';
 import PhysicalSetup from './artifacts/PhysicalSetup';
 import TroubleshootingTree from './artifacts/TroubleshootingTree';
+import DiagramViewer from './artifacts/DiagramViewer';
 
 interface Message {
   role: 'user' | 'assistant';
   content: string;
 }
 
-const parseArtifacts = (content: string): { text: string; artifacts: any[] } => {
-  if (!content) return { text: "", artifacts: [] };
+type ContentBlock =
+  | { type: 'text'; content: string }
+  | { type: 'artifact'; artifact: any };
 
-  const artifacts: any[] = [];
-  let text = content;
+const parseContentBlocks = (content: string): ContentBlock[] => {
+  if (!content) return [];
 
+  const blocks: ContentBlock[] = [];
   try {
     const regex = /```json\s+([\s\S]*?)\s+```/g;
     let match;
+    let lastIndex = 0;
 
     while ((match = regex.exec(content)) !== null) {
+      if (match.index > lastIndex) {
+        blocks.push({ type: 'text', content: content.slice(lastIndex, match.index) });
+      }
+
       if (match[1]) {
         try {
           const parsed = JSON.parse(match[1]);
           if (parsed && typeof parsed === 'object') {
-            artifacts.push(parsed);
-            text = text.replace(match[0], "");
+            blocks.push({ type: 'artifact', artifact: parsed });
+          } else {
+            blocks.push({ type: 'text', content: match[0] });
           }
         } catch (e) {
           console.warn("Failed to parse a JSON block", e);
+          blocks.push({ type: 'text', content: match[0] });
         }
       }
+
+      lastIndex = regex.lastIndex;
+    }
+
+    if (lastIndex < content.length) {
+      blocks.push({ type: 'text', content: content.slice(lastIndex) });
     }
   } catch (e) {
     console.warn("Failed artifact parsing entirely:", e);
+    blocks.push({ type: 'text', content });
   }
 
-  return { text: text.trim(), artifacts };
-};
-
-const parseInlineStyles = (text: string) => {
-  const parts = text.split(/(\*\*.*?\*\*|\*.*?\*|`.*?`)/g);
-  return parts.map((part, index) => {
-    if (part.startsWith('**') && part.endsWith('**')) {
-      return <strong key={index} className="font-semibold text-yellow-500/90">{part.slice(2, -2)}</strong>;
+  return blocks.reduce((acc: ContentBlock[], curr: ContentBlock) => {
+    if (curr.type === 'text') {
+      if (acc.length > 0 && acc[acc.length - 1].type === 'text') {
+        const lastBlock = acc[acc.length - 1] as { type: 'text', content: string };
+        lastBlock.content += curr.content;
+      } else {
+        acc.push({ ...curr });
+      }
+    } else {
+      acc.push(curr);
     }
-    if (part.startsWith('*') && part.endsWith('*')) {
-      return <em key={index} className="italic text-zinc-300">{part.slice(1, -1)}</em>;
+    return acc;
+  }, []).map(block => {
+    if (block.type === 'text') {
+      return { ...block, content: block.content.trim() };
     }
-    if (part.startsWith('`') && part.endsWith('`')) {
-      return <code key={index} className="bg-zinc-800 text-zinc-300 px-1 py-0.5 rounded text-xs font-mono">{part.slice(1, -1)}</code>;
-    }
-    return part;
+    return block;
+  }).filter(block => {
+    if (block.type === 'text' && !block.content) return false;
+    return true;
   });
 };
 
-const MarkdownRenderer = ({ content }: { content: string }) => {
+const MarkdownRenderer = ({ content, onPageClick }: { content: string, onPageClick?: (url: string) => void }) => {
   if (!content) return null;
 
-  const lines = content.split('\n');
+  const processedContent = content.replace(/\[?[Pp]age\s+(\d+)\]?/gi, '[Page $1](#page-$1)');
 
   return (
-    <div className="flex flex-col gap-1.5 break-words">
-      {lines.map((line, i) => {
-        if (!line.trim()) return <div key={i} className="h-1.5" />;
-
-        const headingMatch = line.match(/^(#{1,6})\s+(.*)$/);
-        if (headingMatch) {
-          const level = headingMatch[1].length;
-          const text = headingMatch[2];
-          const sizes = ['text-xl', 'text-lg', 'text-base', 'text-sm', 'text-sm', 'text-sm'];
-          const margin = i === 0 ? 'mb-1' : 'mt-3 mb-1';
-          return (
-            <div key={i} className={`font-semibold text-zinc-100 ${sizes[level - 1]} ${margin}`}>
-              {parseInlineStyles(text)}
-            </div>
-          );
-        }
-
-        if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
-          return (
-            <div key={i} className="flex gap-2 ml-1">
-              <span className="text-zinc-500 select-none">•</span>
-              <span className="flex-1">{parseInlineStyles(line.replace(/^[-*]\s+/, ''))}</span>
-            </div>
-          );
-        }
-
-        if (/^\d+\.\s/.test(line.trim())) {
-          const match = line.trim().match(/^(\d+\.)\s+(.*)/);
-          return (
-            <div key={i} className="flex gap-2 ml-1">
-              <span className="text-zinc-500 tabular-nums select-none">{match?.[1]}</span>
-              <span className="flex-1">{parseInlineStyles(match?.[2] || '')}</span>
-            </div>
-          );
-        }
-
-        return <p key={i} className="leading-relaxed">{parseInlineStyles(line)}</p>;
-      })}
+    <div className="flex flex-col break-words text-sm text-zinc-200 space-y-2 max-w-full overflow-hidden [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          h1: ({ node, ...props }: any) => <h1 className="font-semibold text-zinc-100 text-xl mt-4 mb-2" {...props} />,
+          h2: ({ node, ...props }: any) => <h2 className="font-semibold text-zinc-100 text-lg mt-4 mb-2" {...props} />,
+          h3: ({ node, ...props }: any) => <h3 className="font-semibold text-zinc-100 text-base mt-4 mb-2" {...props} />,
+          h4: ({ node, ...props }: any) => <h4 className="font-semibold text-zinc-100 text-sm mt-3 mb-1" {...props} />,
+          h5: ({ node, ...props }: any) => <h5 className="font-semibold text-zinc-100 text-sm mt-3 mb-1" {...props} />,
+          h6: ({ node, ...props }: any) => <h6 className="font-semibold text-zinc-100 text-sm mt-3 mb-1" {...props} />,
+          p: ({ node, ...props }: any) => <p className="leading-relaxed" {...props} />,
+          ul: ({ node, ...props }: any) => <ul className="list-disc list-outside space-y-1 ml-5 my-2" {...props} />,
+          ol: ({ node, ...props }: any) => <ol className="list-decimal list-outside space-y-1 ml-5 my-2 tabular-nums" {...props} />,
+          li: ({ node, ...props }: any) => <li className="text-zinc-200" {...props} />,
+          strong: ({ node, ...props }: any) => <strong className="font-semibold text-yellow-500/90" {...props} />,
+          em: ({ node, ...props }: any) => <em className="italic text-zinc-300" {...props} />,
+          pre: ({ node, ...props }: any) => <pre className="bg-zinc-800 p-3 rounded-md overflow-x-auto text-xs font-mono my-3 border border-zinc-700/50 w-full" {...props} />,
+          code: ({ node, className, ...props }: any) => {
+            const isInline = !className && !props.children?.toString().includes('\n');
+            return <code className={`${isInline ? 'bg-zinc-800 text-zinc-300 px-1 py-0.5 rounded text-xs font-mono border border-zinc-700/50 break-words whitespace-pre-wrap' : 'text-zinc-300 bg-transparent'}`} {...props} />;
+          },
+          a: ({ node, href, ...props }: any) => {
+            if (href?.startsWith('#page-')) {
+              const pageNum = href.replace('#page-', '');
+              return (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    const apiBaseUri = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+                    onPageClick?.(`${apiBaseUri}/static/pages/page_${pageNum}.jpg`);
+                  }}
+                  className="inline-flex items-center text-sky-400 hover:text-sky-300 underline decoration-sky-400/30 underline-offset-4 cursor-pointer font-medium px-1"
+                  {...props}
+                />
+              );
+            }
+            return <a href={href} target="_blank" rel="noopener noreferrer" className="text-sky-400 underline hover:text-sky-300" {...props} />;
+          },
+          hr: ({ node, ...props }: any) => <hr className="border-zinc-800 my-4" {...props} />,
+          table: ({ node, ...props }: any) => <div className="overflow-x-auto w-full my-3"><table className="w-full text-sm text-left border-collapse border border-zinc-800 min-w-max" {...props} /></div>,
+          th: ({ node, ...props }: any) => <th className="border border-zinc-800 px-3 py-2 bg-zinc-900/80 text-zinc-200 font-medium" {...props} />,
+          td: ({ node, ...props }: any) => <td className="border border-zinc-800 px-3 py-2 text-zinc-300 bg-zinc-900/30" {...props} />,
+          del: ({ node, ...props }: any) => <del className="line-through text-zinc-500" {...props} />,
+          blockquote: ({ node, ...props }: any) => <blockquote className="border-l-4 border-zinc-700 pl-4 py-1 italic text-zinc-400 my-3 bg-zinc-900/40" {...props} />
+        }}
+      >
+        {processedContent}
+      </ReactMarkdown>
     </div>
   );
 };
@@ -109,7 +143,54 @@ export default function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [modalImage, setModalImage] = useState<string | null>(null);
+  const [isListening, setIsListening] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = true;
+      recognitionRef.current.interimResults = true;
+
+      recognitionRef.current.onresult = (event: any) => {
+        let finalTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript + ' ';
+          }
+        }
+        if (finalTranscript) {
+          setInputMessage(prev => {
+            const separator = prev && !prev.endsWith(' ') ? ' ' : '';
+            return prev + separator + finalTranscript.trim();
+          });
+        }
+      };
+
+      recognitionRef.current.onerror = (event: any) => {
+        console.error("Speech recognition error", event.error);
+        setIsListening(false);
+      };
+
+      recognitionRef.current.onend = () => {
+        setIsListening(false);
+      };
+    }
+  }, []);
+
+  const toggleListening = () => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+    } else {
+      if (!inputMessage.trim()) setInputMessage("");
+      recognitionRef.current?.start();
+      setIsListening(true);
+    }
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -232,7 +313,8 @@ export default function ChatInterface() {
             }
 
             const isLastAgentMessage = index === messages.length - 1 && isLoading;
-            const { text, artifacts } = parseArtifacts(msg.content);
+            const blocks = parseContentBlocks(msg.content);
+            const fullText = msg.content.replace(/```json[\s\S]*?```/g, '');
 
             return (
               <div key={index} className="flex justify-start gap-3 animate-in fade-in slide-in-from-bottom-2 duration-500 fill-mode-both">
@@ -242,25 +324,39 @@ export default function ChatInterface() {
                   </div>
                 </div>
                 <div className="max-w-[85%] space-y-3 w-full">
-                  {(text || isLastAgentMessage || artifacts.length === 0) && (
+                  {blocks.length === 0 && isLastAgentMessage && (
                     <div className="rounded-2xl rounded-tl-sm bg-zinc-900 px-4 py-3 text-sm text-zinc-200 border border-zinc-800/80 shadow-md">
-                      {text ? <MarkdownRenderer content={text} /> : <p className="leading-relaxed text-zinc-500 animate-pulse">Thinking...</p>}
+                      <p className="leading-relaxed text-zinc-500 animate-pulse">Thinking...</p>
                     </div>
                   )}
 
-                  {artifacts.map((artifact, i) => (
-                    <React.Fragment key={i}>
-                      {artifact.artifact_type === 'process_selector' && (
-                        <ProcessSelector payload={artifact} llmText={text} />
-                      )}
-                      {artifact.artifact_type === 'physical_setup' && (
-                        <PhysicalSetup payload={artifact} />
-                      )}
-                      {artifact.artifact_type === 'troubleshooting' && (
-                        <TroubleshootingTree payload={artifact} />
-                      )}
-                    </React.Fragment>
-                  ))}
+                  {blocks.map((block, i) => {
+                    if (block.type === 'text') {
+                      return (
+                        <div key={i} className="rounded-2xl rounded-tl-sm bg-zinc-900 px-4 py-3 text-sm text-zinc-200 border border-zinc-800/80 shadow-md">
+                          <MarkdownRenderer content={block.content} onPageClick={setModalImage} />
+                        </div>
+                      );
+                    }
+
+                    const artifact = block.artifact;
+                    return (
+                      <React.Fragment key={i}>
+                        {artifact.artifact_type === 'process_selector' && (
+                          <ProcessSelector payload={artifact} llmText={fullText} />
+                        )}
+                        {artifact.artifact_type === 'physical_setup' && (
+                          <PhysicalSetup payload={artifact} />
+                        )}
+                        {artifact.artifact_type === 'troubleshooting' && (
+                          <TroubleshootingTree payload={artifact} />
+                        )}
+                        {artifact.component === 'DiagramViewer' && (
+                          <DiagramViewer payload={artifact} />
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
                 </div>
               </div>
             );
@@ -272,16 +368,22 @@ export default function ChatInterface() {
       {/* Input Area */}
       <footer className="flex-none p-3 bg-zinc-950 border-t border-zinc-900 relative">
         <div className="absolute -top-6 left-0 right-0 h-6 bg-gradient-to-t from-zinc-950 to-transparent pointer-events-none" />
-        <div className="max-w-3xl mx-auto flex gap-2 items-end bg-zinc-900/80 border border-zinc-800 rounded-2xl p-1.5 focus-within:ring-1 focus-within:ring-yellow-500/50 focus-within:border-yellow-500/50 transition-all">
+        <div className={`max-w-3xl mx-auto flex gap-2 items-end bg-zinc-900/80 border rounded-2xl p-1.5 focus-within:ring-1 focus-within:ring-yellow-500/50 focus-within:border-yellow-500/50 transition-all ${isListening ? 'border-yellow-500/50 ring-1 ring-yellow-500/50' : 'border-zinc-800'}`}>
           <textarea
             rows={1}
-            placeholder="Ask about the Vulcan OmniPro 220..."
+            placeholder={isListening ? "Listening..." : "Ask about the Vulcan OmniPro 220..."}
             className="flex-1 max-h-32 min-h-[40px] resize-none bg-transparent border-none text-sm text-zinc-100 placeholder:text-zinc-500 focus:ring-0 px-3 py-2.5 outline-none leading-relaxed"
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
             onKeyDown={handleKeyDown}
             disabled={isLoading}
           />
+          <button
+            onClick={toggleListening}
+            className={`p-2.5 rounded-xl transition-colors shrink-0 mb-0.5 ${isListening ? 'bg-zinc-800 text-yellow-500 animate-pulse shadow-[0_0_10px_rgba(234,179,8,0.2)]' : 'bg-transparent text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'}`}
+          >
+            {isListening ? <Mic size={18} /> : <MicOff size={18} />}
+          </button>
           <button
             onClick={handleSubmit}
             disabled={isLoading || !inputMessage.trim()}
@@ -294,6 +396,29 @@ export default function ChatInterface() {
           Vulcan Multimodal Agent. Responses may vary based on manual version.
         </p>
       </footer>
+
+      {/* Modal */}
+      {modalImage && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/90 backdrop-blur-md transition-all"
+          onClick={() => setModalImage(null)}
+        >
+          <div className="relative max-w-5xl w-full max-h-[90vh] flex flex-col items-center animate-in fade-in zoom-in-95 duration-200">
+            <button
+              className="absolute -top-12 right-0 p-2 text-zinc-400 hover:text-white transition-colors bg-zinc-800 rounded-full"
+              onClick={(e) => { e.stopPropagation(); setModalImage(null); }}
+            >
+              <X size={24} />
+            </button>
+            <img
+              src={modalImage}
+              alt="Manual Page"
+              className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl bg-white"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

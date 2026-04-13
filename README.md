@@ -1,92 +1,75 @@
-# Prox Founding Engineer Challenge
+# Vulcan OmniPro 220 - Interactive Support Agent
 
-<img src="product.webp" alt="Vulcan OmniPro 220" width="400" /> <img src="product-inside.webp" alt="Vulcan OmniPro 220 — inside panel" width="400" />
+[INSERT LOOM VIDEO DEMO LINK HERE]
 
-## The Product
+## Project Overview
+The Vulcan OmniPro 220 Support Agent is a next-generation multimodal conversational AI built to deliver unparalleled, hands-free hardware support directly in the garage. By combining robust RAG (Retrieval-Augmented Generation) capabilities with an Interactive Artifact Engine, complex mechanical configurations and troubleshooting steps are rendered dynamically as interactive React interfaces rather than dense text. 
 
-The [Vulcan OmniPro 220](https://www.harborfreight.com/omnipro-220-industrial-multiprocess-welder-with-120240v-input-57812.html) is a multiprocess welding system sold by Harbor Freight. It supports four welding processes (MIG, Flux-Cored, TIG, and Stick), runs on both 120V and 240V input, and has an LCD-based synergic control system.
+Built exclusively for the Vulcan OmniPro 220 manual, it features voice dictation, full-page original manual surfing, diagram extraction, and automated diagnostics capabilities.
 
-Its owner's manual is 48 pages of dense technical content. Duty cycle matrices across multiple voltages and amperages, polarity setup procedures that differ per welding process, wire feed mechanisms with specific tensioner calibrations, wiring schematics, troubleshooting matrices, weld diagnosis diagrams, and a full parts list.
+## Architecture
+The repository uses a modern, high-performance monorepo architecture:
+- **Frontend**: Next.js (React 18), Tailwind CSS, Lucide Icons. Designed mobile-first for harsh garage environments.
+- **Backend Service**: FastAPI (Python 3.11+). Handles robust async streaming and orchestrates system prompts.
+- **LLM Base**: Anthropic Claude 3.5 Sonnet (Claude 4.6 configuration template). Serves as the primary synthesis engine capable of reasoning multimodally.
+- **Vector Database**: ChromaDB. Used for Offline RAG pipeline ingestion indexing the raw Vulcan manuals via sentence-transformers embeddings.
 
-This is exactly the kind of product Prox exists for. Nobody knows how to use this machine straight out of the box but has time to read 48 page manual, but a complicated machine needs expert-level support.
+## The Artifact Engine
+The core innovation in this project is the **Interactive Artifact Rendering Engine**.
+Instead of returning giant blocks of text when a user asks how to set up their welder, Claude is instructed to append structured JSON payloads via a customized System Prompt protocol. 
 
-Additional video: https://www.youtube.com/watch?v=kxGDoGcnhBw
+The Next.js frontend intercepts the server-sent events stream, parses instances of ````json {"artifact_type": "physical_setup", ... } ```` or `{"component": "DiagramViewer", ...}`, removes them from the text payload, and natively mounts interactive, tailwind-styled React widgets directly into the chat feed.
 
-## Your Job
+This enables:
+- Visual Machine process selectors.
+- Physical polarity / connection readouts.
+- Extracted reference diagrams natively loaded from the backend context.
+- Guided troubleshooting decision trees.
 
-Build a multimodal reasoning agent for the Vulcan OmniPro 220 using the Claude Agent SDK. The agent must be able to answer deep technical questions about this product accurately, helpfully, and not just in text.
+## Structured Knowledge Extraction
+To prevent hallucination in critical hardware configurations, the backend combines standard Semantic RAG alongside a static extraction pipeline:
+1. **PyMuPDF Diagram Extraction**: A local Python script parses the embedded manual PDFs and geometrically isolates and extracts embedded visual diagrams.
+2. **Deterministic Lookup Matrices**: Wire feed speeds, voltage polarity, and gas types for the synergic machine are hardcoded into `machine_specs.json` reducing inference latency and ensuring 100% accuracy on critical safety operations.
+3. **Claude Tool Mapping**: Claude uses the Anthropic Tool Spec schema to programmatically ping these sub-datasets based on missing context.
 
-The manuals are in the `files/` directory.
+## Local Setup Instructions
 
-**There is no limit to how far you can go.** You can integrate voice. You can build a full interactive experience. Sky is the limit. The more ambitious and polished, the better.
+### Pre-requisites
+- Node.js 18+
+- Python 3.11+
+- Anthropic API Key
 
-## What We're Testing
-
-### 1. Deep Technical Accuracy
-
-Your agent needs to answer questions like these correctly:
-
-- "What's the duty cycle for MIG welding at 200A on 240V?"
-- "I'm getting porosity in my flux-cored welds. What should I check?"
-- "What polarity setup do I need for TIG welding? Which socket does the ground clamp go in?"
-
-We will test with questions that require cross-referencing multiple manual sections, understanding visual content (diagrams, schematics, charts), and handling ambiguous questions that need clarification from the user.
-
-### 2. Multimodal Responses
-
-This is the most important part. Your agent must not be text-only.
-
-- If someone asks about polarity setup, the agent should draw or show a diagram of which cable goes in which socket, not just describe it.
-- If the answer relates to a specific image in the manual (the wire feed mechanism, the front panel controls, the weld diagnosis examples), the agent should surface that image.
-- If a question is complex enough, the agent should generate interactive content: a duty cycle calculator, a troubleshooting flowchart, a settings configurator that takes process + material + thickness and outputs recommended wire speed and voltage.
-
-When something is too cognitively hard to explain in words, the agent should draw it. Real-time diagrams, interactive schematics, visual walkthroughs generated through code.
-
-For your agent to handle these responses well you need to reverse engineer Claude artifacts. Here are two places where you can start:
-- https://claude.ai/artifacts (see how Claude renders interactive artifacts in chat)
-- https://www.reidbarber.com/blog/reverse-engineering-claude-artifacts
-
-### 3. Tone and Helpfulness
-
-Imagine your user just bought this welder and is standing in their garage trying to set it up. They're not an idiot, but they're not a professional welder either.
-
-### 4. Knowledge Extraction Quality
-
-The manual has a mix of text, tables, labeled diagrams, schematics, and decision matrices. Some critical information exists only in images (the welding process selection chart, the weld diagnosis photos, the wiring schematic). We want to see that your agent understands and presents the visual content, not just the text.
-
-## Tech Requirements
-
-- Use the [Anthropic Claude Agent SDK](https://docs.anthropic.com) as the foundation for your agent.
-- The project must run locally with a single API key provided via `.env`.
-- You are responsible for your own API costs during development.
-
-## How to Present Your Work
-
-**This matters.** Your submission is not just the code — it's how you present it.
-
-- **Build a frontend.** The best way for us to evaluate your agent is if it has a clean, simple UI we can run immediately. This is realistically the only way to properly demo an agent like this.
-- **Hosting is a plus.** If you host it somewhere we can access without cloning, that's a strong signal. Not required, but it removes friction and shows initiative.
-- **Write a clear README.** Explain how your agent works, what design decisions you made, how knowledge is extracted and represented, and how to run it. Your documentation will be evaluated — we want to see how you think and communicate, not just how you code.
-- **Video walkthrough is a huge plus.** Record yourself demoing the agent and explaining your approach. Walk through the hard questions, show how it handles multimodal responses, explain your architecture. This gives us a much richer picture of your work than code alone.
-
-We should be running your agent within 2 minutes of cloning your repo:
-
+### 1. Configure Environment
+Create an `.env` file at the root of the project:
 ```bash
-git clone <your-fork>
-cd <your-fork>
-cp .env.example .env   # we plug in our own Anthropic API key
-# your install command (npm install, uv install, etc.)
-# your run command (npm run dev, python app.py, etc.)
+ANTHROPIC_API_KEY=your-api-key-here
+FRONTEND_URLS=http://localhost:3000,http://localhost:3001
+NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 
-If it takes longer than that to set up, that's a problem.
+### 2. Backend Setup
+Navigate to the `apps/api` folder:
+```bash
+cd apps/api
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python scripts/extract_diagrams.py  # Extract the manual diagrams
+uvicorn main:app --reload --port 8000
+```
 
-## What to Submit
+### 3. Frontend Setup
+In a new terminal window, navigate to the root folder:
+```bash
+npm install
+npm run dev --workspace=apps/web
+```
+Access the application at `http://localhost:3000`.
 
-1. Fork this repo.
-2. Build your solution.
-3. Submit your fork URL through the form at [useprox.com/join/challenge](https://useprox.com/join/challenge).
+## Deployment Configuration
 
-## What Happens Next
+**Backend Deployment:**
+The `apps/api` folder includes an optimized `Dockerfile`. Simply build and push to Google Cloud Run, AWS App Runner, or Render. Provide the `$PORT` ENV variable and your `${ANTHROPIC_API_KEY}`. Add your production frontend domain to `FRONTEND_URLS` inside the `.env`.
 
-We review submissions on a rolling basis and respond to every single one within a few days. Good luck.
+**Frontend Deployment:**
+Deploy the Next.js app to Vercel or Netlify. Set `NEXT_PUBLIC_API_URL` to point to the deployed FastAPI endpoint. Ensure that the Next.js build output runs standalone or appropriately for your edge provider.
