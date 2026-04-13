@@ -152,7 +152,7 @@ export default function ChatInterface() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [ttsEnabled, setTtsEnabled] = useState(false);
   const ttsEnabledRef = useRef(ttsEnabled);
-  
+
   useEffect(() => {
     ttsEnabledRef.current = ttsEnabled;
     if (!ttsEnabled && typeof window !== 'undefined' && window.speechSynthesis) {
@@ -226,7 +226,7 @@ export default function ChatInterface() {
     try {
       setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
 
-      const response = await fetch('http://localhost:8000/chat', {
+      const response = await fetch(process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: newMessages }),
@@ -259,7 +259,7 @@ export default function ChatInterface() {
               if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
                 const textChunk = event.delta.text;
                 agentContent += textChunk;
-                
+
                 if (ttsEnabledRef.current) {
                   for (let i = 0; i < textChunk.length; i++) {
                     const char = textChunk[i];
@@ -328,9 +328,9 @@ export default function ChatInterface() {
 
   useEffect(() => {
     if (!isListening) return;
-    
+
     const lowerInput = inputMessage.toLowerCase();
-    
+
     if (lowerInput.includes('voice off')) {
       const cleanedMessage = inputMessage.replace(/voice off[.?!]?/gi, '').trim();
       if (recognitionRef.current) {
@@ -340,9 +340,9 @@ export default function ChatInterface() {
       setInputMessage(cleanedMessage);
     } else if (lowerInput.includes('submit message')) {
       const cleanedMessage = inputMessage.replace(/submit message[.?!]?/gi, '').trim();
-      
+
       setInputMessage(cleanedMessage);
-      
+
       setTimeout(() => {
         if (handleSubmitRef.current) {
           handleSubmitRef.current(cleanedMessage);
@@ -373,7 +373,7 @@ export default function ChatInterface() {
           </div>
         </div>
         <div className="relative">
-          <button 
+          <button
             onClick={() => setIsMenuOpen(!isMenuOpen)}
             className="p-2 text-zinc-400 hover:text-zinc-100 transition-colors"
           >
@@ -471,7 +471,7 @@ export default function ChatInterface() {
       {/* Input Area */}
       <footer className="flex-none p-3 bg-zinc-950 border-t border-zinc-900 relative">
         <div className="absolute -top-6 left-0 right-0 h-6 bg-gradient-to-t from-zinc-950 to-transparent pointer-events-none" />
-        
+
         {isListening && (
           <div className="absolute -top-10 left-0 right-0 flex justify-center animate-in fade-in slide-in-from-bottom-2 pointer-events-none z-10">
             <span className="text-xs font-medium text-yellow-500 bg-zinc-900 border border-yellow-500/30 px-3 py-1.5 rounded-full shadow-lg">
