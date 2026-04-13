@@ -161,7 +161,7 @@ async def chat_endpoint(request: ChatRequest):
     print(f"[RAG]  🔍 Searching ChromaDB...")
     results = collection.query(
         query_texts=[query_text],
-        n_results=2 
+        n_results=4
     )
     
     context_chunks = []
@@ -194,7 +194,7 @@ For Process Recommendations, use this schema:
 { "artifact_type": "process_selector", "inputs": {"material": "...", "thickness": "...", "environment": "..."} }```
 For Cable Setup, use this schema:
 ```json
-{ "artifact_type": "physical_setup", "process": "...", "ground_polarity": "...", "torch_polarity": "..." }```
+{ "artifact_type": "physical_setup", "process": "...", "ground_polarity": "...", "torch_polarity": "...", "gas": "...", "drive_roll": "..." }```
 For Troubleshooting Mechanical Issues (e.g., porosity, wire feeding problems), use this schema:
 ```json
 { "artifact_type": "troubleshooting", "issue": "...", "steps": ["Check X", "Adjust Y", "Verify Z"] }```
@@ -314,6 +314,8 @@ Do not include any text after the JSON block."""
                         elif tc["name"] == "request_diagrams":
                             page_number = input_data.get("page_number")
                             meta_path = Path(__file__).parent / "static" / "diagrams" / "diagram_metadata.json"
+                            
+                            matching = None
                             if meta_path.exists():
                                 with open(meta_path, "r", encoding="utf-8") as f:
                                     meta = json.load(f)
@@ -321,12 +323,21 @@ Do not include any text after the JSON block."""
                                     k: {"imageUrl": f"/static/diagrams/{k}", "description": v["description"]}
                                     for k, v in meta.items() if v["page"] == page_number
                                 }
-                                if matching:
-                                    result_text = json.dumps(matching)
-                                else:
-                                    result_text = "No extracted diagrams found on this page."
+                                
+                            if matching:
+                                result_text = json.dumps(matching)
                             else:
-                                result_text = "Metadata missing. Extraction step incomplete."
+                                page_path = Path(__file__).parent / "static" / "pages" / f"page_{page_number}.jpg"
+                                if page_path.exists():
+                                    fallback = {
+                                        f"page_{page_number}_full.jpg": {
+                                            "imageUrl": f"/static/pages/page_{page_number}.jpg",
+                                            "description": f"Full page {page_number} visual (Fallback)"
+                                        }
+                                    }
+                                    result_text = json.dumps(fallback)
+                                else:
+                                    result_text = "No extracted diagrams found on this page, and no fallback page image available."
                             
                         user_message["content"].append({
                             "type": "tool_result",

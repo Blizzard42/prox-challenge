@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Menu, ShieldAlert, Cpu, Mic, MicOff, X } from 'lucide-react';
+import { Send, Menu, ShieldAlert, Cpu, Mic, MicOff, X, Volume2, VolumeX } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import ProcessSelector from './artifacts/ProcessSelector';
@@ -23,7 +23,7 @@ const parseContentBlocks = (content: string): ContentBlock[] => {
 
   const blocks: ContentBlock[] = [];
   try {
-    const regex = /```json\s+([\s\S]*?)\s+```/g;
+    const regex = /```json\s*([\s\S]*?)\s*```/gi;
     let match;
     let lastIndex = 0;
 
@@ -35,7 +35,7 @@ const parseContentBlocks = (content: string): ContentBlock[] => {
       if (match[1]) {
         try {
           const parsed = JSON.parse(match[1]);
-          if (parsed && typeof parsed === 'object') {
+          if (parsed && typeof parsed === 'object' && (parsed.artifact_type || parsed.component)) {
             blocks.push({ type: 'artifact', artifact: parsed });
           } else {
             blocks.push({ type: 'text', content: match[0] });
@@ -147,6 +147,18 @@ export default function ChatInterface() {
   const [isListening, setIsListening] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
+  const handleSubmitRef = useRef<any>(null);
+
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [ttsEnabled, setTtsEnabled] = useState(false);
+  const ttsEnabledRef = useRef(ttsEnabled);
+  
+  useEffect(() => {
+    ttsEnabledRef.current = ttsEnabled;
+    if (!ttsEnabled && typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+  }, [ttsEnabled]);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
@@ -200,10 +212,11 @@ export default function ChatInterface() {
     scrollToBottom();
   }, [messages]);
 
-  const handleSubmit = async () => {
-    if (!inputMessage.trim() || isLoading) return;
+  const handleSubmit = async (overrideText?: string | React.MouseEvent | React.KeyboardEvent) => {
+    const textToSubmit = typeof overrideText === 'string' ? overrideText : inputMessage;
+    if (!textToSubmit.trim() || isLoading) return;
 
-    const userMessage: Message = { role: 'user', content: inputMessage };
+    const userMessage: Message = { role: 'user', content: textToSubmit };
     const newMessages = [...messages, userMessage];
 
     setMessages(newMessages);
@@ -225,6 +238,9 @@ export default function ChatInterface() {
       const decoder = new TextDecoder("utf-8");
 
       let agentContent = "";
+      let ttsAccumulator = "";
+      let inCodeBlock = false;
+      let backtickCount = 0;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -241,7 +257,39 @@ export default function ChatInterface() {
             try {
               const event = JSON.parse(dataStr);
               if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
-                agentContent += event.delta.text;
+                const textChunk = event.delta.text;
+                agentContent += textChunk;
+                
+                if (ttsEnabledRef.current) {
+                  for (let i = 0; i < textChunk.length; i++) {
+                    const char = textChunk[i];
+                    if (char === '`') {
+                      backtickCount++;
+                      if (backtickCount === 3) {
+                        inCodeBlock = !inCodeBlock;
+                        backtickCount = 0;
+                      }
+                    } else {
+                      if (backtickCount > 0) {
+                        if (!inCodeBlock) ttsAccumulator += '`'.repeat(backtickCount);
+                        backtickCount = 0;
+                      }
+                      if (!inCodeBlock) {
+                        ttsAccumulator += char;
+                        if (/[.!?\n]/.test(char)) {
+                          const sentence = ttsAccumulator.replace(/[*_#]/g, '').replace(/\[?[Pp]age \d+\]?/gi, '').trim();
+                          if (sentence.length > 0) {
+                            const utterance = new SpeechSynthesisUtterance(sentence);
+                            utterance.rate = 1.05;
+                            window.speechSynthesis.speak(utterance);
+                          }
+                          ttsAccumulator = "";
+                        }
+                      }
+                    }
+                  }
+                }
+
                 setMessages(prev => {
                   const updated = [...prev];
                   const lastIndex = updated.length - 1;
@@ -257,12 +305,51 @@ export default function ChatInterface() {
           }
         }
       }
+
+      if (ttsEnabledRef.current && ttsAccumulator.trim().length > 0 && !inCodeBlock) {
+        if (backtickCount > 0) ttsAccumulator += '`'.repeat(backtickCount);
+        const sentence = ttsAccumulator.replace(/[*_#]/g, '').replace(/\[?[Pp]age \d+\]?/gi, '').trim();
+        if (sentence.length > 0) {
+          const utterance = new SpeechSynthesisUtterance(sentence);
+          utterance.rate = 1.05;
+          window.speechSynthesis.speak(utterance);
+        }
+      }
     } catch (error) {
       console.error("Chat error:", error);
     } finally {
       setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    handleSubmitRef.current = handleSubmit;
+  });
+
+  useEffect(() => {
+    if (!isListening) return;
+    
+    const lowerInput = inputMessage.toLowerCase();
+    
+    if (lowerInput.includes('voice off')) {
+      const cleanedMessage = inputMessage.replace(/voice off[.?!]?/gi, '').trim();
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      setIsListening(false);
+      setInputMessage(cleanedMessage);
+    } else if (lowerInput.includes('submit message')) {
+      const cleanedMessage = inputMessage.replace(/submit message[.?!]?/gi, '').trim();
+      
+      setInputMessage(cleanedMessage);
+      
+      setTimeout(() => {
+        if (handleSubmitRef.current) {
+          handleSubmitRef.current(cleanedMessage);
+        }
+      }, 50);
+    }
+  }, [inputMessage, isListening]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -285,9 +372,25 @@ export default function ChatInterface() {
             <p className="text-[10px] uppercase tracking-widest text-yellow-500/80 font-semibold">Support Agent</p>
           </div>
         </div>
-        <button className="p-2 text-zinc-400 hover:text-zinc-100 transition-colors">
-          <Menu size={20} />
-        </button>
+        <div className="relative">
+          <button 
+            onClick={() => setIsMenuOpen(!isMenuOpen)}
+            className="p-2 text-zinc-400 hover:text-zinc-100 transition-colors"
+          >
+            <Menu size={20} />
+          </button>
+          {isMenuOpen && (
+            <div className="absolute right-0 mt-2 w-56 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden z-20 animate-in fade-in slide-in-from-top-2">
+              <button
+                onClick={() => { setTtsEnabled(!ttsEnabled); setIsMenuOpen(false); }}
+                className="w-full text-left px-4 py-3 text-sm text-zinc-200 hover:bg-zinc-800 flex items-center gap-3 transition-colors"
+              >
+                {ttsEnabled ? <Volume2 size={16} className="text-yellow-500" /> : <VolumeX size={16} className="text-zinc-500" />}
+                {ttsEnabled ? 'Disable Voice Response' : 'Enable Voice Response'}
+              </button>
+            </div>
+          )}
+        </div>
       </header>
 
       {/* Messages Area */}
@@ -323,7 +426,7 @@ export default function ChatInterface() {
                     <Cpu size={14} className={`text-yellow-500 ${isLastAgentMessage ? 'animate-[spin_2.5s_linear_infinite]' : ''}`} />
                   </div>
                 </div>
-                <div className="max-w-[85%] space-y-3 w-full">
+                <div className="flex-1 space-y-3 min-w-0">
                   {blocks.length === 0 && isLastAgentMessage && (
                     <div className="rounded-2xl rounded-tl-sm bg-zinc-900 px-4 py-3 text-sm text-zinc-200 border border-zinc-800/80 shadow-md">
                       <p className="leading-relaxed text-zinc-500 animate-pulse">Thinking...</p>
@@ -341,7 +444,7 @@ export default function ChatInterface() {
 
                     const artifact = block.artifact;
                     return (
-                      <React.Fragment key={i}>
+                      <div key={i} className="w-full py-2 [&>div]:w-full [&>div]:mx-auto">
                         {artifact.artifact_type === 'process_selector' && (
                           <ProcessSelector payload={artifact} llmText={fullText} />
                         )}
@@ -354,7 +457,7 @@ export default function ChatInterface() {
                         {artifact.component === 'DiagramViewer' && (
                           <DiagramViewer payload={artifact} />
                         )}
-                      </React.Fragment>
+                      </div>
                     );
                   })}
                 </div>
@@ -368,6 +471,15 @@ export default function ChatInterface() {
       {/* Input Area */}
       <footer className="flex-none p-3 bg-zinc-950 border-t border-zinc-900 relative">
         <div className="absolute -top-6 left-0 right-0 h-6 bg-gradient-to-t from-zinc-950 to-transparent pointer-events-none" />
+        
+        {isListening && (
+          <div className="absolute -top-10 left-0 right-0 flex justify-center animate-in fade-in slide-in-from-bottom-2 pointer-events-none z-10">
+            <span className="text-xs font-medium text-yellow-500 bg-zinc-900 border border-yellow-500/30 px-3 py-1.5 rounded-full shadow-lg">
+              Voice mode enabled. Say "Submit Message" to send, or "Voice off" to disable.
+            </span>
+          </div>
+        )}
+
         <div className={`max-w-3xl mx-auto flex gap-2 items-end bg-zinc-900/80 border rounded-2xl p-1.5 focus-within:ring-1 focus-within:ring-yellow-500/50 focus-within:border-yellow-500/50 transition-all ${isListening ? 'border-yellow-500/50 ring-1 ring-yellow-500/50' : 'border-zinc-800'}`}>
           <textarea
             rows={1}

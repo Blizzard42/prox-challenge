@@ -11,7 +11,7 @@ def slice_pdf_to_images():
         print(f"[-] Error: Could not find {pdf_path}")
         return
         
-    output_dir = api_dir / "data" / "pages"
+    output_dir = api_dir / "static" / "pages"
     output_dir.mkdir(parents=True, exist_ok=True)
     
     doc = fitz.open(pdf_path)
