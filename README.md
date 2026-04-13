@@ -1,6 +1,10 @@
 # Vulcan OmniPro 220 - Interactive Support Agent
 
-[INSERT LOOM VIDEO DEMO LINK HERE]
+Start here!
+https://www.loom.com/share/8a2afa06f3ca4c59ad6451fdba5f16af
+
+Website Link (No need to setup the repo yourself)
+https://prox-challenge-web.vercel.app/
 
 ## Project Overview
 The Vulcan OmniPro 220 Support Agent is a next-generation multimodal conversational AI built to deliver unparalleled, hands-free hardware support directly in the garage. By combining robust RAG (Retrieval-Augmented Generation) capabilities with an Interactive Artifact Engine, complex mechanical configurations and troubleshooting steps are rendered dynamically as interactive React interfaces rather than dense text. 
