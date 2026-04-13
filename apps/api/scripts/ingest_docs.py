@@ -7,11 +7,10 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 def main():
     script_dir = Path(__file__).resolve().parent
-    api_dir = script_dir.parent
-    root_dir = api_dir.parent.parent
+    root_dir = script_dir.parent
     
-    files_dir = root_dir / "files"
-    chroma_data_dir = api_dir / "chroma_data"
+    files_dir = root_dir / "data" / "files"
+    chroma_data_dir = root_dir / "chroma_data"
     
     print(f"[*] Reading PDFs from: {files_dir}")
     print(f"[*] Chroma storage at: {chroma_data_dir}")

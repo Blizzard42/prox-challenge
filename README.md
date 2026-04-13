@@ -54,6 +54,8 @@ cd apps/api
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+python scripts/ingest_docs.py # Setup Chroma Database for RAG
+python scripts/slice_pages.py # Slice pages into images for RAG
 python scripts/extract_diagrams.py  # Extract the manual diagrams
 uvicorn main:app --reload --port 8000
 ```

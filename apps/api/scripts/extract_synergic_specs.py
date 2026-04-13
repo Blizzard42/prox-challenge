@@ -9,10 +9,9 @@ import fitz  # PyMuPDF
 
 # Setup paths
 SCRIPT_DIR = Path(__file__).parent
-API_DIR = SCRIPT_DIR.parent
-ROOT_DIR = API_DIR.parent.parent
-FILES_DIR = ROOT_DIR / "files"
-DATA_DIR = API_DIR / "data"
+ROOT_DIR = SCRIPT_DIR.parent
+FILES_DIR = ROOT_DIR / "data" / "files"
+DATA_DIR = ROOT_DIR / "data"
 
 # Load environment variables
 load_dotenv(ROOT_DIR / ".env")

@@ -7,9 +7,9 @@ from docling.datamodel.pipeline_options import PdfPipelineOptions
 
 def extract_diagrams_docling():
     # Setup paths
-    root_dir = Path(__file__).parent.parent.parent.parent
-    pdf_path = root_dir / "files" / "owner-manual.pdf"
-    static_dir = Path(__file__).parent.parent / "static" / "diagrams"
+    root_dir = Path(__file__).parent.parent
+    pdf_path = root_dir / "data" / "files" / "owner-manual.pdf"
+    static_dir = root_dir / "static" / "diagrams"
     
     # Create directories if they don't exist
     os.makedirs(static_dir, exist_ok=True)

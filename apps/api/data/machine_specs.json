@@ -1,0 +1,54 @@
+{
+  "processes": {
+    "MIG": {
+      "ground_polarity": "negative",
+      "torch_polarity": "positive",
+      "gas": "Required (shielding gas, indoor welding recommended)",
+      "drive_roll": "V-groove"
+    },
+    "Flux_Cored": {
+      "ground_polarity": "positive",
+      "torch_polarity": "negative",
+      "gas": "Not required (no-gas / self-shielded)",
+      "drive_roll": "Knurled V-groove"
+    },
+    "TIG": {
+      "ground_polarity": "positive",
+      "torch_polarity": "negative",
+      "gas": "Required (shielding gas via gas line to regulator)",
+      "drive_roll": "Not applicable (wire feed power disconnected)"
+    },
+    "Stick": {
+      "ground_polarity": "negative",
+      "torch_polarity": "positive",
+      "gas": "Not required",
+      "drive_roll": "Not applicable (wire feed power disconnected)"
+    }
+  },
+  "selection_matrix": [
+    {
+      "material": "Steel, Stainless Steel",
+      "thickness_range": "18 Gauge to 5/16",
+      "recommended_process": "Flux_Cored",
+      "characteristics": "More spatter; ideal for outdoor or windy conditions; forgiving on rusty or dirty steels; good out-of-position welding capabilities; high deposition rates achievable; no-gas required; low skill level"
+    },
+    {
+      "material": "Steel, Stainless Steel, Aluminum (spool gun required)",
+      "thickness_range": "22 Gauge to 3/8",
+      "recommended_process": "MIG",
+      "characteristics": "Clean/minimal spatter; fast production (high welding speeds); easiest to learn; clean welds with no slag; better control on thin materials; gas required; indoor welding recommended; low-to-moderate skill level"
+    },
+    {
+      "material": "Steel, Stainless Steel, Castings",
+      "thickness_range": "10 Gauge to 1/2",
+      "recommended_process": "Stick",
+      "characteristics": "More spatter; ideal for outdoor or windy conditions; forgiving on rusty or dirty steels; deep penetration; good choice for thicker materials; no-gas required; low-to-moderate skill level"
+    },
+    {
+      "material": "Steel, Stainless Steel, Chrome Moly (DC TIG required), Aluminum, Magnesium Alloys (AC TIG required)",
+      "thickness_range": "24 Gauge to 3/16",
+      "recommended_process": "TIG",
+      "characteristics": "Extremely clean; highest quality welds; extremely aesthetic weld appearance; can be used on a variety of materials; precise control; gas required; indoor welding recommended; high skill level"
+    }
+  ]
+}

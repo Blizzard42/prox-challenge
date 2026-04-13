@@ -3,15 +3,14 @@ from pathlib import Path
 
 def slice_pdf_to_images():
     print("Starting PDF Slice Process...")
-    api_dir = Path(__file__).resolve().parent.parent
-    workspace_dir = api_dir.parent.parent
+    root_dir = Path(__file__).resolve().parent.parent
     
-    pdf_path = workspace_dir / "files" / "owner-manual.pdf"
+    pdf_path = root_dir / "data" / "files" / "owner-manual.pdf"
     if not pdf_path.exists():
         print(f"[-] Error: Could not find {pdf_path}")
         return
         
-    output_dir = api_dir / "static" / "pages"
+    output_dir = root_dir / "static" / "pages"
     output_dir.mkdir(parents=True, exist_ok=True)
     
     doc = fitz.open(pdf_path)

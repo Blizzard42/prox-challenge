@@ -1,5 +1,4 @@
 .venv
 __pycache__
 chroma_data
-data
 static
