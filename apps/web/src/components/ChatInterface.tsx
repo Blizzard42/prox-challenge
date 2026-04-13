@@ -226,7 +226,7 @@ export default function ChatInterface() {
     try {
       setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
 
-      const response = await fetch(process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000', {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: newMessages }),
