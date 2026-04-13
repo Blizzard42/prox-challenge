@@ -7,6 +7,7 @@ WORKDIR /app
 # Install system dependencies (e.g. for PyMuPDF or Chroma if needed)
 RUN apt-get update && apt-get install -y \
     build-essential \
+    && apt-get install -y libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first to leverage Docker cache
