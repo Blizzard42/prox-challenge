@@ -101,6 +101,10 @@ load_dotenv(dotenv_path=dotenv_path)
 
 app = FastAPI(title="Claude Prox Challenge Backend")
 
+# Create the static directory (and parents) if it doesn't exist to prevent crash
+static_dir = Path(__file__).parent / "static"
+os.makedirs(static_dir, exist_ok=True)
+
 # Mount the static directory
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
